@@ -15,6 +15,8 @@ const { sendOtpEmail } = require("./utils/emailService");
 const { generateOtp, validateOtp } = require("./utils/otpManager");
 
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: true });
+console.log("🤖 Telegram bot is running...");
+
 const userStates = new Map(); // Tracks current step per user
 
 // Ensure data-volt folder exists
