@@ -13,9 +13,9 @@ const transporter = nodemailer.createTransport({
 
 async function sendOtpEmail(to, otp) {
   await transporter.sendMail({
-    from: `"FormEase OTP" <${process.env.GMAIL_USER}>`,
+    from: `"OTP Bot" <${process.env.GMAIL_USER}>`,
     to,
-    subject: "Register/Login OTP",
+    subject: "Your OTP Code",
     text: `Your OTP is: ${otp}. It is valid for 2 minutes.`,
   });
 }

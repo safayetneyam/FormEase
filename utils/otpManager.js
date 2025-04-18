@@ -7,7 +7,7 @@ function generateOtp(chatId, type = "register") {
   otpCache[chatId] = {
     otp,
     type,
-    expiresAt: Date.now() + 2 * 60 * 1000, // 2 minutes
+    expiresAt: Date.now() + 2 * 60 * 1000,
   };
   return otp;
 }
@@ -18,8 +18,6 @@ function validateOtp(chatId, inputOtp, expectedType) {
   if (record.type !== expectedType) return false;
   if (record.otp !== inputOtp) return false;
   if (Date.now() > record.expiresAt) return false;
-
-  // OTP is valid
   delete otpCache[chatId];
   return true;
 }

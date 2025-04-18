@@ -1,4 +1,4 @@
-// ✅ Step 4: bot.js - main Telegram bot logic
+// ✅ Step 5: bot.js - handles commands, login, logout
 
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
@@ -13,31 +13,59 @@ const {
 } = require("./utils/userStore");
 const { sendOtpEmail } = require("./utils/emailService");
 const { generateOtp, validateOtp } = require("./utils/otpManager");
+const {
+  setLoggedInUser,
+  getLoggedInUser,
+  removeLoggedInUser,
+  cleanupExpiredSessions,
+  removeSessionByUsername,
+} = require("./utils/loginSessionStore");
 
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: true });
 console.log("🤖 Telegram bot is running...");
 
-const userStates = new Map(); // Tracks current step per user
+cleanupExpiredSessions(10 * 60 * 1000); // 10 minutes
 
-// Ensure data-volt folder exists
+const userStates = new Map();
+const timeouts = new Map();
 const dataVoltPath = path.join(__dirname, "data-volt");
 if (!fs.existsSync(dataVoltPath)) fs.mkdirSync(dataVoltPath);
 
-// /register command
+function startAutoLogout(chatId) {
+  if (timeouts.has(chatId)) {
+    clearTimeout(timeouts.get(chatId));
+  }
+  const timeout = setTimeout(() => {
+    bot.sendMessage(chatId, "⏳ You have been logged out due to inactivity.");
+    removeLoggedInUser(chatId);
+    timeouts.delete(chatId);
+  }, 5 * 60 * 1000);
+  timeouts.set(chatId, timeout);
+}
+
+bot.onText(/\/logout/, (msg) => {
+  const chatId = msg.chat.id;
+  if (getLoggedInUser(chatId)) {
+    clearTimeout(timeouts.get(chatId));
+    removeLoggedInUser(chatId);
+    bot.sendMessage(chatId, "✅ You have been logged out.");
+  } else {
+    bot.sendMessage(chatId, "ℹ️ You are not currently logged in.");
+  }
+});
+
 bot.onText(/\/register/, (msg) => {
   const chatId = msg.chat.id;
   bot.sendMessage(chatId, "📛 Please enter a username (no spaces):");
   userStates.set(chatId, { step: "register_username" });
 });
 
-// /login command
 bot.onText(/\/login/, (msg) => {
   const chatId = msg.chat.id;
   bot.sendMessage(chatId, "🔐 Please enter your username:");
   userStates.set(chatId, { step: "login_username" });
 });
 
-// Message handler for flow
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const session = userStates.get(chatId);
@@ -45,7 +73,6 @@ bot.on("message", async (msg) => {
 
   if (!session || msg.text.startsWith("/")) return;
 
-  // ===== Registration Flow =====
   if (session.step === "register_username") {
     if (/\s/.test(text)) {
       bot.sendMessage(
@@ -96,7 +123,6 @@ bot.on("message", async (msg) => {
     return;
   }
 
-  // ===== Login Flow =====
   if (session.step === "login_username") {
     if (!usernameExists(text)) {
       bot.sendMessage(chatId, "❌ Username not found. Try registering first.");
@@ -131,6 +157,9 @@ bot.on("message", async (msg) => {
 
   if (session.step === "login_otp") {
     if (validateOtp(chatId, text, "login")) {
+      removeSessionByUsername(session.username); // ✅ Enforce one session per user
+      setLoggedInUser(chatId, session.username);
+      startAutoLogout(chatId);
       bot.sendMessage(
         chatId,
         `✅ Login successful. Welcome back, ${session.username}`
