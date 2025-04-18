@@ -39,7 +39,7 @@ function startAutoLogout(chatId) {
     bot.sendMessage(chatId, "⏳ You have been logged out due to inactivity.");
     removeLoggedInUser(chatId);
     timeouts.delete(chatId);
-  }, 5 * 60 * 1000);
+  }, 10 * 60 * 1000);
   timeouts.set(chatId, timeout);
 }
 
