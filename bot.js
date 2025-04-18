@@ -1,9 +1,10 @@
-// ✅ Step 5: bot.js - handles commands, login, logout
+// ✅ Step 5: bot.js - handles commands, login, logout, and file uploads
 
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const fs = require("fs");
 const path = require("path");
+
 const {
   usernameExists,
   addUser,
@@ -20,11 +21,17 @@ const {
   cleanupExpiredSessions,
   removeSessionByUsername,
 } = require("./utils/loginSessionStore");
+const {
+  getUserVoltFiles,
+  getTempFiles,
+  saveTempFile,
+  moveFilesToVolt,
+} = require("./utils/fileUtils");
 
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: true });
 console.log("🤖 Telegram bot is running...");
 
-cleanupExpiredSessions(10 * 60 * 1000); // 10 minutes
+cleanupExpiredSessions(10 * 60 * 1000);
 
 const userStates = new Map();
 const timeouts = new Map();
@@ -64,6 +71,66 @@ bot.onText(/\/login/, (msg) => {
   const chatId = msg.chat.id;
   bot.sendMessage(chatId, "🔐 Please enter your username:");
   userStates.set(chatId, { step: "login_username" });
+});
+
+bot.onText(/\/files/, async (msg) => {
+  const chatId = msg.chat.id;
+  const user = getLoggedInUser(chatId);
+  if (!user) {
+    bot.sendMessage(chatId, "❌ Please login first to upload in your volt.");
+    return;
+  }
+
+  const files = getUserVoltFiles(user.username);
+  const formatted = files.length
+    ? files.map((f, i) => `${i + 1}. ${f}`).join("\n")
+    : "📂 No files in your volt yet.";
+  bot.sendMessage(
+    chatId,
+    `📁 Your volt files:\n${formatted}\n\n📤 Now upload files. When done, type /submit-files to confirm.`
+  );
+});
+
+bot.onText(/\/submit-files/, (msg) => {
+  const chatId = msg.chat.id;
+  const user = getLoggedInUser(chatId);
+  if (!user) {
+    bot.sendMessage(chatId, "❌ Please login first to submit files.");
+    return;
+  }
+
+  const tempFiles = getTempFiles(chatId);
+  if (!tempFiles.length) {
+    bot.sendMessage(chatId, "📭 No files were uploaded yet.");
+    return;
+  }
+
+  const moved = moveFilesToVolt(chatId, user.username);
+  const list = moved.map((f, i) => `${i + 1}. ${f}`).join("\n");
+  bot.sendMessage(chatId, `✅ Files successfully saved to your volt:\n${list}`);
+});
+
+bot.on("document", async (msg) => {
+  const chatId = msg.chat.id;
+  const user = getLoggedInUser(chatId);
+  if (!user) {
+    bot.sendMessage(chatId, "❌ You must be logged in to upload files.");
+    return;
+  }
+
+  const fileId = msg.document.file_id;
+  const fileName = msg.document.file_name;
+  const fileLink = await bot.getFileLink(fileId);
+
+  const res = await fetch(fileLink);
+  const arrayBuffer = await res.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  saveTempFile(chatId, fileName, buffer);
+  bot.sendMessage(
+    chatId,
+    `📎 File '${fileName}' received and saved temporarily.`
+  );
 });
 
 bot.on("message", async (msg) => {
@@ -157,7 +224,7 @@ bot.on("message", async (msg) => {
 
   if (session.step === "login_otp") {
     if (validateOtp(chatId, text, "login")) {
-      removeSessionByUsername(session.username); // ✅ Enforce one session per user
+      removeSessionByUsername(session.username);
       setLoggedInUser(chatId, session.username);
       startAutoLogout(chatId);
       bot.sendMessage(
