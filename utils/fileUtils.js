@@ -49,9 +49,29 @@ function moveFilesToVolt(chatId, username) {
   return movedFiles;
 }
 
+function clearTempFiles(chatId) {
+  const userTemp = path.join(tempUploadRoot, chatId.toString());
+  if (fs.existsSync(userTemp)) {
+    fs.rmdirSync(userTemp, { recursive: true });
+  }
+}
+
+function clearAllTempUploads() {
+  if (fs.existsSync(tempUploadRoot)) {
+    for (const folder of fs.readdirSync(tempUploadRoot)) {
+      const dirPath = path.join(tempUploadRoot, folder);
+      if (fs.lstatSync(dirPath).isDirectory()) {
+        fs.rmdirSync(dirPath, { recursive: true });
+      }
+    }
+  }
+}
+
 module.exports = {
   getUserVoltFiles,
   getTempFiles,
   saveTempFile,
   moveFilesToVolt,
+  clearTempFiles,
+  clearAllTempUploads,
 };

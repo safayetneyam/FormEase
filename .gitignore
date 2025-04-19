@@ -6,3 +6,6 @@ node_modules/
 
 # Ignore security folder
 security/
+
+data-volt/
+temp-uploads/

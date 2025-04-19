@@ -4,7 +4,6 @@ require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const fs = require("fs");
 const path = require("path");
-
 const {
   usernameExists,
   addUser,
@@ -26,14 +25,18 @@ const {
   getTempFiles,
   saveTempFile,
   moveFilesToVolt,
+  clearTempFiles,
+  clearAllTempUploads,
 } = require("./utils/fileUtils");
 
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: true });
 console.log("🤖 Telegram bot is running...");
 
+clearAllTempUploads();
 cleanupExpiredSessions(10 * 60 * 1000);
 
 const userStates = new Map();
+const uploadState = new Map();
 const timeouts = new Map();
 const dataVoltPath = path.join(__dirname, "data-volt");
 if (!fs.existsSync(dataVoltPath)) fs.mkdirSync(dataVoltPath);
@@ -45,6 +48,8 @@ function startAutoLogout(chatId) {
   const timeout = setTimeout(() => {
     bot.sendMessage(chatId, "⏳ You have been logged out due to inactivity.");
     removeLoggedInUser(chatId);
+    clearTempFiles(chatId);
+    uploadState.set(chatId, false);
     timeouts.delete(chatId);
   }, 10 * 60 * 1000);
   timeouts.set(chatId, timeout);
@@ -55,6 +60,8 @@ bot.onText(/\/logout/, (msg) => {
   if (getLoggedInUser(chatId)) {
     clearTimeout(timeouts.get(chatId));
     removeLoggedInUser(chatId);
+    clearTempFiles(chatId);
+    uploadState.set(chatId, false);
     bot.sendMessage(chatId, "✅ You have been logged out.");
   } else {
     bot.sendMessage(chatId, "ℹ️ You are not currently logged in.");
@@ -85,6 +92,7 @@ bot.onText(/\/files/, async (msg) => {
   const formatted = files.length
     ? files.map((f, i) => `${i + 1}. ${f}`).join("\n")
     : "📂 No files in your volt yet.";
+  uploadState.set(chatId, true);
   bot.sendMessage(
     chatId,
     `📁 Your volt files:\n${formatted}\n\n📤 Now upload files. When done, type /submit-files to confirm.`
@@ -107,6 +115,7 @@ bot.onText(/\/submit-files/, (msg) => {
 
   const moved = moveFilesToVolt(chatId, user.username);
   const list = moved.map((f, i) => `${i + 1}. ${f}`).join("\n");
+  uploadState.set(chatId, false);
   bot.sendMessage(chatId, `✅ Files successfully saved to your volt:\n${list}`);
 });
 
@@ -115,6 +124,14 @@ bot.on("document", async (msg) => {
   const user = getLoggedInUser(chatId);
   if (!user) {
     bot.sendMessage(chatId, "❌ You must be logged in to upload files.");
+    return;
+  }
+
+  if (!uploadState.get(chatId)) {
+    bot.sendMessage(
+      chatId,
+      "⚠️ Please use /files before uploading any document."
+    );
     return;
   }
 
@@ -224,7 +241,15 @@ bot.on("message", async (msg) => {
 
   if (session.step === "login_otp") {
     if (validateOtp(chatId, text, "login")) {
-      removeSessionByUsername(session.username);
+      const oldChatId = removeSessionByUsername(session.username);
+      if (oldChatId && oldChatId !== chatId) {
+        bot.sendMessage(
+          oldChatId,
+          "⚠️ You have been logged out because this account was accessed from another device."
+        );
+      }
+      clearTempFiles(chatId);
+      uploadState.set(chatId, false);
       setLoggedInUser(chatId, session.username);
       startAutoLogout(chatId);
       bot.sendMessage(

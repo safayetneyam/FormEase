@@ -1,4 +1,5 @@
 // ✅ Step 4: loginSessionStore.js - persistent login tracking
+
 const fs = require("fs");
 const path = require("path");
 
@@ -39,16 +40,16 @@ function removeLoggedInUser(chatId) {
 
 function removeSessionByUsername(username) {
   const logins = readLogins();
-  let modified = false;
+  let removedChatId = null;
   for (const chatId in logins) {
     if (logins[chatId].username === username) {
+      removedChatId = chatId;
       delete logins[chatId];
-      modified = true;
+      break;
     }
   }
-  if (modified) {
-    writeLogins(logins);
-  }
+  writeLogins(logins);
+  return removedChatId;
 }
 
 function cleanupExpiredSessions(expiryInMs) {
