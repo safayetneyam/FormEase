@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { loadJson, saveJson } = require("./jsonUtils");
 
 const loginFilePath = path.join(__dirname, "../security/loggedin.json");
 if (!fs.existsSync(loginFilePath)) {
@@ -52,19 +53,9 @@ function removeSessionByUsername(username) {
   return removedChatId;
 }
 
-function cleanupExpiredSessions(expiryInMs) {
-  const logins = readLogins();
-  const now = Date.now();
-  let modified = false;
-  for (const chatId in logins) {
-    if (now - logins[chatId].loginTime > expiryInMs) {
-      delete logins[chatId];
-      modified = true;
-    }
-  }
-  if (modified) {
-    writeLogins(logins);
-  }
+function cleanupLoggedInSessions() {
+  const sessions = loadJson(loginFilePath);
+  saveJson(loginFilePath, {}); // Clear all sessions
 }
 
 module.exports = {
@@ -72,5 +63,5 @@ module.exports = {
   getLoggedInUser,
   removeLoggedInUser,
   removeSessionByUsername,
-  cleanupExpiredSessions,
+  cleanupLoggedInSessions,
 };

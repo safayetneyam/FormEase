@@ -1,9 +1,11 @@
-// ✅ Step 5: bot.js - handles commands, login, logout, and file uploads
+// bot.js
 
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const fs = require("fs");
 const path = require("path");
+// const fetch = require("node-fetch");
+
 const {
   usernameExists,
   addUser,
@@ -17,7 +19,7 @@ const {
   setLoggedInUser,
   getLoggedInUser,
   removeLoggedInUser,
-  cleanupExpiredSessions,
+  cleanupLoggedInSessions,
   removeSessionByUsername,
 } = require("./utils/loginSessionStore");
 const {
@@ -25,19 +27,18 @@ const {
   getTempFiles,
   saveTempFile,
   moveFilesToVolt,
-  clearTempFiles,
-  clearAllTempUploads,
 } = require("./utils/fileUtils");
+const { processFilesForUser } = require("./label-process/fileProcessor");
 
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: true });
 console.log("🤖 Telegram bot is running...");
 
-clearAllTempUploads();
-cleanupExpiredSessions(10 * 60 * 1000);
+cleanupLoggedInSessions();
 
 const userStates = new Map();
-const uploadState = new Map();
 const timeouts = new Map();
+const uploadState = new Map();
+
 const dataVoltPath = path.join(__dirname, "data-volt");
 if (!fs.existsSync(dataVoltPath)) fs.mkdirSync(dataVoltPath);
 
@@ -48,7 +49,6 @@ function startAutoLogout(chatId) {
   const timeout = setTimeout(() => {
     bot.sendMessage(chatId, "⏳ You have been logged out due to inactivity.");
     removeLoggedInUser(chatId);
-    clearTempFiles(chatId);
     uploadState.set(chatId, false);
     timeouts.delete(chatId);
   }, 10 * 60 * 1000);
@@ -60,8 +60,11 @@ bot.onText(/\/logout/, (msg) => {
   if (getLoggedInUser(chatId)) {
     clearTimeout(timeouts.get(chatId));
     removeLoggedInUser(chatId);
-    clearTempFiles(chatId);
     uploadState.set(chatId, false);
+    const tempPath = path.join(__dirname, "temp-uploads", String(chatId));
+    if (fs.existsSync(tempPath)) {
+      fs.rmSync(tempPath, { recursive: true });
+    }
     bot.sendMessage(chatId, "✅ You have been logged out.");
   } else {
     bot.sendMessage(chatId, "ℹ️ You are not currently logged in.");
@@ -92,14 +95,14 @@ bot.onText(/\/files/, async (msg) => {
   const formatted = files.length
     ? files.map((f, i) => `${i + 1}. ${f}`).join("\n")
     : "📂 No files in your volt yet.";
-  uploadState.set(chatId, true);
   bot.sendMessage(
     chatId,
-    `📁 Your volt files:\n${formatted}\n\n📤 Now upload files. When done, type /submit-files to confirm.`
+    `📁 Your volt files:\n${formatted}\n\n📤 Now upload files. When done, type /submit_files to confirm.`
   );
+  uploadState.set(chatId, true);
 });
 
-bot.onText(/\/submit-files/, (msg) => {
+bot.onText(/\/submit_files/, (msg) => {
   const chatId = msg.chat.id;
   const user = getLoggedInUser(chatId);
   if (!user) {
@@ -115,8 +118,8 @@ bot.onText(/\/submit-files/, (msg) => {
 
   const moved = moveFilesToVolt(chatId, user.username);
   const list = moved.map((f, i) => `${i + 1}. ${f}`).join("\n");
-  uploadState.set(chatId, false);
   bot.sendMessage(chatId, `✅ Files successfully saved to your volt:\n${list}`);
+  uploadState.set(chatId, false);
 });
 
 bot.on("document", async (msg) => {
@@ -128,10 +131,7 @@ bot.on("document", async (msg) => {
   }
 
   if (!uploadState.get(chatId)) {
-    bot.sendMessage(
-      chatId,
-      "⚠️ Please use /files before uploading any document."
-    );
+    bot.sendMessage(chatId, "⚠️ Please use /files before uploading.");
     return;
   }
 
@@ -150,115 +150,103 @@ bot.on("document", async (msg) => {
   );
 });
 
+// ✅ NEW: /process_file command
+bot.onText(/\/process_file/, async (msg) => {
+  const chatId = msg.chat.id;
+  const user = getLoggedInUser(chatId);
+  if (!user) {
+    bot.sendMessage(chatId, "❌ You must be logged in to process your files.");
+    return;
+  }
+
+  try {
+    await processFilesForUser(user.username);
+    bot.sendMessage(
+      chatId,
+      "✅ Files processed and label JSON generated successfully!"
+    );
+  } catch (err) {
+    console.error(err);
+    bot.sendMessage(chatId, "❌ Failed to process files. Please try again.");
+  }
+});
+
+// ✅ Continue handling OTP flow and registration logic
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
+  const text = msg.text;
   const session = userStates.get(chatId);
-  const text = msg.text?.trim();
-
-  if (!session || msg.text.startsWith("/")) return;
+  if (!session || !text || text.startsWith("/")) return;
 
   if (session.step === "register_username") {
-    if (/\s/.test(text)) {
-      bot.sendMessage(
-        chatId,
-        "❌ Username must not contain spaces. Try again:"
-      );
+    if (text.includes(" ")) {
+      bot.sendMessage(chatId, "❌ Username must not contain spaces.");
       return;
     }
     if (usernameExists(text)) {
-      bot.sendMessage(chatId, "⚠️ Username already exists. Choose another:");
+      bot.sendMessage(
+        chatId,
+        "❌ Username already exists. Try a different one."
+      );
       return;
     }
+
     session.username = text;
     session.step = "register_email";
-    bot.sendMessage(chatId, "📧 Now enter your email address:");
-    return;
-  }
-
-  if (session.step === "register_email") {
-    const otp = generateOtp(chatId, "register");
-    session.email = text;
-    try {
-      await sendOtpEmail(text, otp);
-      session.step = "register_otp";
-      bot.sendMessage(chatId, "📨 OTP sent! Enter the code:");
-    } catch (err) {
-      console.error("Email error:", err);
-      bot.sendMessage(chatId, "❌ Failed to send OTP. Try again later.");
-      userStates.delete(chatId);
-    }
-    return;
-  }
-
-  if (session.step === "register_otp") {
+    bot.sendMessage(chatId, "📧 Enter your email to receive OTP:");
+  } else if (session.step === "register_email") {
+    const email = text;
+    session.email = email;
+    session.otp = generateOtp(chatId, "register");
+    await sendOtpEmail(email, session.otp);
+    session.step = "register_otp";
+    bot.sendMessage(chatId, "📩 OTP sent to your email. Please enter the OTP:");
+  } else if (session.step === "register_otp") {
     if (validateOtp(chatId, text, "register")) {
       addUser(session.username, session.email);
+      const userPath = path.join(dataVoltPath, session.username);
+      if (!fs.existsSync(userPath)) fs.mkdirSync(userPath, { recursive: true });
       verifyUser(session.username);
-      const folderPath = path.join(dataVoltPath, session.username);
-      if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath);
-      bot.sendMessage(
-        chatId,
-        `✅ Registration successful! Welcome, ${session.username}`
-      );
+      bot.sendMessage(chatId, "✅ Registration complete. You can now /login.");
+      userStates.delete(chatId);
     } else {
-      bot.sendMessage(chatId, "❌ Invalid or expired OTP. Try again.");
+      bot.sendMessage(chatId, "❌ Invalid OTP. Try again.");
     }
-    userStates.delete(chatId);
-    return;
-  }
-
-  if (session.step === "login_username") {
-    if (!usernameExists(text)) {
-      bot.sendMessage(chatId, "❌ Username not found. Try registering first.");
-      userStates.delete(chatId);
+  } else if (session.step === "login_username") {
+    const username = text;
+    if (!usernameExists(username) || !isVerified(username)) {
+      bot.sendMessage(chatId, "❌ Invalid or unverified username.");
       return;
     }
-    if (!isVerified(text)) {
-      bot.sendMessage(
-        chatId,
-        "⚠️ User not verified. Please complete registration."
-      );
-      userStates.delete(chatId);
-      return;
-    }
-    const email = getUserEmail(text);
-    const otp = generateOtp(chatId, "login");
-    session.username = text;
-    try {
-      await sendOtpEmail(email, otp);
-      session.step = "login_otp";
-      bot.sendMessage(
-        chatId,
-        "📨 OTP sent to your email. Enter the code to login:"
-      );
-    } catch (err) {
-      console.error("Email error:", err);
-      bot.sendMessage(chatId, "❌ Failed to send OTP. Try again later.");
-      userStates.delete(chatId);
-    }
-    return;
-  }
 
-  if (session.step === "login_otp") {
+    session.username = username;
+    session.otp = generateOtp(chatId, "login");
+    const email = getUserEmail(username);
+    await sendOtpEmail(email, session.otp);
+    session.step = "login_otp";
+    bot.sendMessage(
+      chatId,
+      "📩 OTP sent to your registered email. Please enter it:"
+    );
+  } else if (session.step === "login_otp") {
     if (validateOtp(chatId, text, "login")) {
       const oldChatId = removeSessionByUsername(session.username);
       if (oldChatId && oldChatId !== chatId) {
         bot.sendMessage(
           oldChatId,
-          "⚠️ You have been logged out because this account was accessed from another device."
+          "⚠️ You have been logged out. This account was accessed from another device."
         );
       }
-      clearTempFiles(chatId);
-      uploadState.set(chatId, false);
       setLoggedInUser(chatId, session.username);
       startAutoLogout(chatId);
+      uploadState.set(chatId, false);
       bot.sendMessage(
         chatId,
         `✅ Login successful. Welcome back, ${session.username}`
       );
+      userStates.delete(chatId);
     } else {
-      bot.sendMessage(chatId, "❌ Invalid or expired OTP. Try again.");
+      bot.sendMessage(chatId, "❌ Incorrect OTP. Try again.");
     }
-    userStates.delete(chatId);
   }
 });
