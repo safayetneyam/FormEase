@@ -42,16 +42,23 @@ const uploadState = new Map();
 const dataVoltPath = path.join(__dirname, "data-volt");
 if (!fs.existsSync(dataVoltPath)) fs.mkdirSync(dataVoltPath);
 
-function startAutoLogout(chatId) {
+function startAutoLogout(chatId, username) {
   if (timeouts.has(chatId)) {
     clearTimeout(timeouts.get(chatId));
   }
+
   const timeout = setTimeout(() => {
-    bot.sendMessage(chatId, "⏳ You have been logged out due to inactivity.");
+    const session = getLoggedInUser(chatId);
+
+    // Only send message if this chatId is still linked to the same username
+    if (session && session.username === username) {
+      bot.sendMessage(chatId, "⏳ You have been logged out due to inactivity.");
+    }
+
     removeLoggedInUser(chatId);
-    uploadState.set(chatId, false);
     timeouts.delete(chatId);
   }, 10 * 60 * 1000);
+
   timeouts.set(chatId, timeout);
 }
 
@@ -79,6 +86,13 @@ bot.onText(/\/register/, (msg) => {
 
 bot.onText(/\/login/, (msg) => {
   const chatId = msg.chat.id;
+
+  const currentUser = getLoggedInUser(chatId);
+  if (currentUser) {
+    bot.sendMessage(chatId, "✅ You're already logged in from this device.");
+    return;
+  }
+
   bot.sendMessage(chatId, "🔐 Please enter your username:");
   userStates.set(chatId, { step: "login_username" });
 });
@@ -238,7 +252,7 @@ bot.on("message", async (msg) => {
         );
       }
       setLoggedInUser(chatId, session.username);
-      startAutoLogout(chatId);
+      startAutoLogout(chatId, session.username);
       uploadState.set(chatId, false);
       bot.sendMessage(
         chatId,
