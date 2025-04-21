@@ -3,7 +3,7 @@
 1. Basic Installation
 
 ```bash
-  npm install node-telegram-bot-api dotenv nodemailer axios mammoth pdf-lib puppeteer
+  npm install node-telegram-bot-api dotenv nodemailer axios node-fetch mammoth pdf-lib puppeteer
 
 ```
 
@@ -11,4 +11,11 @@
 
 ```bash
   node bot.js
+```
+
+3. Form Fill Out Helpers
+
+```bash
+  npm install node-telegram-bot-api dotenv nodemailer axios node-fetch mammoth pdf-lib puppeteer
+
 ```

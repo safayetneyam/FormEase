@@ -35,6 +35,13 @@ console.log("🤖 Telegram bot is running...");
 
 cleanupLoggedInSessions();
 
+// ================= BOT COMMAND | FORM COMMANDS =================
+
+const registerSubmitFormCommands = require("./bot-command/submit_form");
+registerSubmitFormCommands(bot);
+
+// ===============================================================
+
 const userStates = new Map();
 const timeouts = new Map();
 const uploadState = new Map();
@@ -145,7 +152,7 @@ bot.on("document", async (msg) => {
   }
 
   if (!uploadState.get(chatId)) {
-    bot.sendMessage(chatId, "⚠️ Please use /files before uploading.");
+    bot.sendMessage(chatId, "⚠️ Entered Upload Command");
     return;
   }
 
