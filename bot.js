@@ -40,6 +40,12 @@ cleanupLoggedInSessions();
 const registerSubmitFormCommands = require("./bot-command/submit_form");
 registerSubmitFormCommands(bot);
 
+const processForm = require("./bot-command/process_form");
+processForm(bot);
+
+const getForm = require("./bot-command/get_form");
+getForm(bot);
+
 // ===============================================================
 
 const userStates = new Map();
